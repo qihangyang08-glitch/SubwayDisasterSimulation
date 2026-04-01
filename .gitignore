@@ -1,0 +1,20 @@
+# OS
+Thumbs.db
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Unreal Engine generated/build artifacts
+UE_PROJECT/PixelDemo/Binaries/
+UE_PROJECT/PixelDemo/DerivedDataCache/
+UE_PROJECT/PixelDemo/Intermediate/
+UE_PROJECT/PixelDemo/Saved/
+UE_PROJECT/PixelDemo/WindowsNoEditor/
+
+# Optional local script outputs/logs
+*.log
+*.tmp
