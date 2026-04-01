@@ -1,0 +1,271 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数字孪生地铁灾害应急仿真系�?/title>
+  <link rel="stylesheet" href="/app-shell.css">
+</head>
+<body>
+  <div class="app-root">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <div class="brand">仿真控制�?/div>
+        <button id="sidebar-toggle" class="icon-btn" type="button">�?/button>
+      </div>
+      <div class="sidebar-nav">
+        <button id="btn-create" class="nav-btn" type="button"><span class="nav-icon">+</span><span class="nav-text">创建仿真</span></button>
+        <button id="btn-history" class="nav-btn" type="button"><span class="nav-icon">H</span><span class="nav-text">历史数据</span></button>
+        <button id="btn-plan" class="nav-btn" type="button"><span class="nav-icon">P</span><span class="nav-text">大模型预�?/span></button>
+        <button id="btn-analysis" class="nav-btn" type="button"><span class="nav-icon">A</span><span class="nav-text">快捷分析</span></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <span class="status-chip">simulationId: <strong id="top-sim-id">-</strong></span>
+          <span class="status-chip"><span id="ack-badge" class="badge">等待Ack</span></span>
+        </div>
+        <div class="topbar-right">
+          <span class="status-chip"><span id="http-dot" class="dot"></span><span class="label" id="http-text">HTTP断开</span></span>
+          <span class="status-chip"><span id="socket-dot" class="dot"></span><span class="label" id="socket-text">Socket断开</span></span>
+          <span class="status-chip"><span id="pixel-dot" class="dot"></span><span class="label" id="pixel-text">流断开</span></span>
+          <span class="status-chip"><span id="ue-dot" class="dot"></span><span class="label" id="ue-text">UE离线</span></span>
+          <span class="status-chip">simTime: <strong id="top-sim-time">0.00s</strong></span>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <div class="player-stage">
+          <div id="player"></div>
+          <div id="player-placeholder" class="player-placeholder">等待UE像素流连�?..</div>
+
+          <div id="analysis-panel" class="analysis-panel hidden">
+            <div class="analysis-head">快捷数据分析</div>
+            <div class="analysis-grid">
+              <div class="metric"><div class="metric-label">总人�?/div><div class="metric-value" id="metric-total-people">0</div></div>
+              <div class="metric"><div class="metric-label">水位高度</div><div class="metric-value" id="metric-water-level">0.00</div></div>
+              <div class="metric"><div class="metric-label">烟雾范围</div><div class="metric-value" id="metric-smoke-range">0.00</div></div>
+              <div class="metric"><div class="metric-label">受影响人�?/div><div class="metric-value" id="metric-affected-people">0</div></div>
+              <div class="metric"><div class="metric-label">受影响程�?/div><div class="metric-value" id="metric-affected-level">0.00</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="timeline">
+          <div class="timeline-row">
+            <input id="middleware-url" class="input" type="text" value="http://127.0.0.1:3100" placeholder="中台地址">
+            <input id="socket-url" class="input" type="text" value="http://127.0.0.1:3100" placeholder="Socket地址">
+            <input id="input-simulation-id" class="input" type="text" placeholder="simulationId">
+            <button id="subscribe-sim" class="ctrl-btn" type="button">订阅</button>
+            <button id="connect-all" class="ctrl-btn primary" type="button">连接所�?/button>
+          </div>
+          <div class="timeline-row" style="margin-top:8px;">
+            <button id="btn-back" class="ctrl-btn" type="button">后退</button>
+            <button id="btn-play" class="ctrl-btn primary" type="button">播放</button>
+            <button id="btn-pause" class="ctrl-btn" type="button">暂停</button>
+            <button id="btn-forward" class="ctrl-btn" type="button">前进</button>
+            <select id="step-size" class="select">
+              <option value="1">1�?/option>
+              <option value="5">5�?/option>
+              <option value="10">10�?/option>
+            </select>
+            <input id="timeline-slider" type="range" min="0" max="100" value="0">
+          </div>
+          <div class="timeline-meta">
+            <span>frameIndex: <strong id="frame-index-view">0</strong></span>
+            <span>进度: <strong id="progress-view">0%</strong></span>
+            <span>simTime: <strong id="time-view">0.00s</strong></span>
+          </div>
+          <div id="mini-log" class="log-bar"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="create-modal" class="modal-mask">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-title">创建仿真</div>
+        <button id="close-create" class="icon-btn" type="button">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="form-item">scenarioId<input id="cfg-scenario-id" class="input" type="text" value="metro_fire_water_01"></label>
+          <label class="form-item">mapLevel<input id="cfg-map-level" class="input" type="text" value="Station_A_Platform"></label>
+          <label class="form-item">totalPeople<input id="cfg-total-people" class="input" type="number" value="500" min="0"></label>
+          <label class="form-item">扩展JSON（可选）<textarea id="cfg-extra" class="textarea" placeholder='{"specialEntities":[]}'></textarea></label>
+        </div>
+        <div class="modal-actions">
+          <button id="save-create" class="primary-btn" type="button">提交创建</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="plan-modal" class="modal-mask">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-title">大模型预案设�?/div>
+        <button id="close-plan" class="icon-btn" type="button">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="form-item">fromSimTime<input id="plan-from-time" class="input" type="number" step="0.1" min="0" value="0"></label>
+          <label class="form-item">目标objective<input id="plan-objective" class="input" type="text" value="降低暴露时长与拥挤度"></label>
+          <label class="form-item" style="grid-column:1/-1;">PlanConfig补充JSON（可选）<textarea id="plan-json" class="textarea" placeholder='{"planRuntime":{"actions":[]}}'></textarea></label>
+        </div>
+        <div class="modal-actions">
+          <button id="save-plan" class="primary-btn" type="button">生成并应用预�?/button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="legacy-hidden" class="legacy-hidden"></div>
+
+  <!-- 依赖库加载检查和降级策略 -->
+  <script>
+    (function() {
+      var errors = [];
+      
+      // 检查WebRTC adapter
+      function checkAdapter() {
+        return new Promise(function(resolve) {
+          var script = document.createElement('script');
+          script.src = 'https://webrtc.github.io/adapter/adapter-latest.js';
+          script.onload = function() {
+            if (typeof adapter !== 'undefined') {
+              console.log('[Dependency] �?WebRTC adapter loaded:', adapter.browserDetails);
+              resolve(true);
+            } else {
+              console.error('[Dependency] �?WebRTC adapter loaded but not available');
+              errors.push('adapter');
+              resolve(false);
+            }
+          };
+          script.onerror = function() {
+            console.error('[Dependency] �?Failed to load WebRTC adapter');
+            errors.push('adapter');
+            resolve(false);
+          };
+          document.head.appendChild(script);
+        });
+      }
+      
+      // 检查Socket.IO（使用稳定版�?.5.4�?
+      function checkSocketIO() {
+        return new Promise(function(resolve) {
+          var script = document.createElement('script');
+          script.src = 'https://cdn.socket.io/4.5.4/socket.io.min.js';
+          script.onload = function() {
+            if (typeof io !== 'undefined') {
+              console.log('[Dependency] �?Socket.IO loaded, version:', io.version || '4.5.4');
+              resolve(true);
+            } else {
+              console.error('[Dependency] �?Socket.IO loaded but not available');
+              errors.push('socket.io');
+              resolve(false);
+            }
+          };
+          script.onerror = function() {
+            console.error('[Dependency] �?Failed to load Socket.IO from CDN');
+            errors.push('socket.io');
+            // 尝试降级到本地文�?
+            tryLocalSocketIO().then(resolve);
+          };
+          document.head.appendChild(script);
+        });
+      }
+      
+      // 尝试从本地加载Socket.IO
+      function tryLocalSocketIO() {
+        return new Promise(function(resolve) {
+          var script = document.createElement('script');
+          script.src = '/socket.io.min.js';
+          script.onload = function() {
+            if (typeof io !== 'undefined') {
+              console.log('[Dependency] �?Socket.IO loaded from local file');
+              resolve(true);
+            } else {
+              resolve(false);
+            }
+          };
+          script.onerror = function() {
+            console.error('[Dependency] �?Local Socket.IO also failed');
+            resolve(false);
+          };
+          document.head.appendChild(script);
+        });
+      }
+      
+      // 加载应用脚本
+      function loadAppScripts() {
+        var scripts = [
+          '/scripts/webRtcPlayer.js',
+          '/scripts/middleware-client.js',
+          '/scripts/app.js',
+          '/scripts/app-shell.js'
+        ];
+        
+        var loadNext = function(index) {
+          if (index >= scripts.length) {
+            console.log('[Dependency] �?All application scripts loaded');
+            return;
+          }
+          
+          var script = document.createElement('script');
+          script.src = scripts[index];
+          script.onload = function() {
+            console.log('[Dependency] �?Loaded:', scripts[index]);
+            loadNext(index + 1);
+          };
+          script.onerror = function() {
+            console.error('[Dependency] �?Failed to load:', scripts[index]);
+            errors.push(scripts[index]);
+            loadNext(index + 1);
+          };
+          document.head.appendChild(script);
+        };
+        
+        loadNext(0);
+      }
+      
+      // 显示错误信息
+      function showErrors() {
+        if (errors.length > 0) {
+          var msg = document.createElement('div');
+          msg.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#ff4444;color:white;padding:15px 30px;border-radius:5px;z-index:99999;font-family:Arial;';
+          msg.textContent = '⚠️ 加载失败: ' + errors.join(', ') + ' - 请检查网络连接或使用本地依赖';
+          document.body.appendChild(msg);
+          
+          setTimeout(function() {
+            msg.remove();
+          }, 8000);
+        }
+      }
+      
+      // 启动加载流程
+      Promise.all([checkAdapter(), checkSocketIO()])
+        .then(function(results) {
+          var allLoaded = results.every(function(r) { return r; });
+          if (allLoaded) {
+            console.log('[Dependency] �?All external dependencies loaded successfully');
+          } else {
+            console.warn('[Dependency] ⚠️ Some dependencies failed to load, app may have limited functionality');
+          }
+          
+          // 继续加载应用脚本
+          loadAppScripts();
+          
+          // 显示错误提示
+          if (errors.length > 0) {
+            setTimeout(showErrors, 1000);
+          }
+        });
+    })();
+  </script>
+</body>
+</html>
+

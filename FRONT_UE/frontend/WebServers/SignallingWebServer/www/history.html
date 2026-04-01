@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>历史数据分析 - 数字孪生地铁灾害应急仿真系统</title>
+  <link rel="stylesheet" href="/history-page.css">
+</head>
+<body>
+  <div class="history-app">
+    <header class="history-topbar">
+      <div class="topbar-left">
+        <h1>仿真历史数据</h1>
+        <span id="history-status" class="status">等待加载</span>
+      </div>
+      <div class="topbar-right">
+        <button id="btn-open-analysis" class="btn btn-primary" type="button">数据分析</button>
+        <button id="btn-refresh-sims" class="btn" type="button">刷新历史</button>
+        <a class="btn" href="/">返回主页面</a>
+      </div>
+    </header>
+
+    <section class="history-workspace">
+      <aside class="history-list-panel">
+        <div class="panel-head">
+          <h2>仿真历史列表</h2>
+          <span id="sim-count" class="sub">0 条</span>
+        </div>
+        <div id="sim-list" class="sim-list">
+          <div class="empty">加载中...</div>
+        </div>
+      </aside>
+
+      <main class="history-main-panel">
+        <section id="analysis-panel" class="analysis-panel hidden">
+          <div class="analysis-head">
+            <h3>数据分析配置</h3>
+            <button id="btn-close-analysis" class="btn btn-sm" type="button">收起</button>
+          </div>
+          <div class="analysis-body">
+            <label class="field">
+              图表类型
+              <select id="analysis-type" class="input">
+                <option value="line">曲线图</option>
+                <option value="heatmap">热点图</option>
+                <option value="bar">柱状图</option>
+                <option value="scatter">散点图</option>
+              </select>
+            </label>
+
+            <div id="line-config" class="line-config">
+              <label class="field">
+                横轴（仅可选一个）
+                <select id="line-x-axis" class="input"></select>
+              </label>
+              <div class="field">
+                纵轴（可多选）
+                <div id="line-y-axis" class="y-axis-grid"></div>
+              </div>
+            </div>
+
+            <div id="analysis-placeholder" class="placeholder"></div>
+          </div>
+        </section>
+
+        <section class="timeline-panel">
+          <div class="panel-head">
+            <h2 id="timeline-title">时间顺序数据列</h2>
+            <span id="timeline-desc" class="sub">请选择左侧仿真记录</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>simTime</th>
+                  <th>frameIndex</th>
+                  <th>totalEvacuated</th>
+                  <th>zoneMaxWaterLevel</th>
+                  <th>zoneMaxFireIntensity</th>
+                  <th>agentCount</th>
+                  <th>activeEntityCount</th>
+                </tr>
+              </thead>
+              <tbody id="timeline-body">
+                <tr><td colspan="7" class="empty">请选择左侧仿真记录</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <script src="/scripts/middleware-client.js"></script>
+  <script src="/scripts/history-page.js"></script>
+</body>
+</html>
