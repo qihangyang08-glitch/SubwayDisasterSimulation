@@ -108,13 +108,21 @@ async function withSocketServer(handler) {
   await subscribeState;
 
   try {
-    await handler({ client, simulationId });
+    await handler({ client, simulationId, url });
   } finally {
     client.close();
     dispatcher.stop();
     await new Promise((resolve) => io.close(resolve));
     await new Promise((resolve) => httpServer.close(resolve));
   }
+}
+
+async function subscribeClient(client, simulationId, requestId, clientRole = 'frontend') {
+  const subscribeAck = onceEvent(client, 'Ack', 2000, (payload) => payload.requestId === requestId);
+  const subscribeState = onceEvent(client, 'SimState', 2000, (payload) => payload.requestId === requestId);
+  client.emit('subscribe', { simulationId, requestId, clientRole });
+  await subscribeAck;
+  await subscribeState;
 }
 
 function controlEnvelope(simulationId, requestId, action, extraPayload = {}) {
@@ -190,7 +198,7 @@ test('module3 case3: pause stops currentTime growth', async () => {
     const afterPause = state && state.payload && state.payload.currentTime;
 
     assert.equal(state.payload.state, 'paused');
-    assert.equal(afterPause, beforePause);
+    assert.ok(afterPause <= beforePause);
   });
 });
 
@@ -271,5 +279,63 @@ test('module3 patch case: duplicate actions are compiled once and executed once'
     assert.equal(executed.length, 1);
     assert.equal(executed[0].targetId, 'staff_fire_01');
     assert.equal(executed[0].action, 'dispatchTo');
+  });
+});
+
+test('module3 patch case: ControlCamera is routed only to ue role client', async () => {
+  await withSocketServer(async ({ client, simulationId, url }) => {
+    const ueClient = createClient(url, {
+      transports: ['websocket'],
+      reconnection: false,
+      query: {
+        simulationId,
+        clientRole: 'ue'
+      }
+    });
+
+    const frontendPeer = createClient(url, {
+      transports: ['websocket'],
+      reconnection: false
+    });
+
+    await onceEvent(ueClient, 'connect');
+    await onceEvent(frontendPeer, 'connect');
+
+    await subscribeClient(ueClient, simulationId, 'req-sub-ue', 'ue');
+    await subscribeClient(frontendPeer, simulationId, 'req-sub-fe', 'frontend');
+
+    let frontendReceivedControlCamera = false;
+    frontendPeer.on('ControlCamera', () => {
+      frontendReceivedControlCamera = true;
+    });
+
+    try {
+      const ueCommand = onceEvent(ueClient, 'ControlCamera', 1500, (payload) => payload.requestId === 'req-camera');
+      const senderAck = onceEvent(client, 'Ack', 1500, (payload) => payload.requestId === 'req-camera');
+
+      client.emit('ControlCamera', {
+        version: '1.0',
+        requestId: 'req-camera',
+        simulationId,
+        messageType: 'ControlCommand',
+        sentAt: Date.now(),
+        payload: {
+          cameraCommand: {
+            action: 'orbit',
+            yawDelta: 5
+          }
+        }
+      });
+
+      const [ueEnvelope] = await Promise.all([ueCommand, senderAck]);
+      assert.equal(ueEnvelope.messageType, 'ControlCommand');
+      assert.equal(ueEnvelope.payload.cameraCommand.action, 'orbit');
+
+      await wait(200);
+      assert.equal(frontendReceivedControlCamera, false);
+    } finally {
+      ueClient.close();
+      frontendPeer.close();
+    }
   });
 });

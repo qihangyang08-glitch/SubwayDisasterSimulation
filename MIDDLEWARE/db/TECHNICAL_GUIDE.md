@@ -343,7 +343,7 @@ async function healthCheck() {
 
 - [MySQL Information Schema](https://dev.mysql.com/doc/refman/8.0/en/information-schema.html)
 - [mysql2 Documentation](https://github.com/sidorares/node-mysql2)
-- [DataStruction.md](../../DataStruction.md) - 项目数据结构规范
+- [DataStruction.md](../../DOCS/ARCHIVE_PHASE1/DataStruction.md) - 项目数据结构规范
 
 ## 💡 最佳实践
 

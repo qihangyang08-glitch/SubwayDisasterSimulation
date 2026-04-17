@@ -1,6 +1,6 @@
 # 过程文档总索引
 
-更新时间：2026-04-01
+更新时间：2026-04-17
 
 ## 1. 使用说明
 
@@ -9,6 +9,16 @@
 ## 2. 本阶段新增
 
 1. NEXT_PHASE_EXECUTION_PLAN.md（下一阶段执行方案）
+2. 2026-04/MOCK_SERVICES_INTEGRATION_CHANGELOG_20260417.md（模拟服务接入变更记录）
+3. 2026-04/MOCK_SERVICES_E2E_TEST_EVIDENCE_20260417.md（模拟服务联调测试证据）
+
+## 2.1 本轮归档说明（2026-04-17）
+
+围绕“模拟后端 + 模拟大模型”接入所产生的中间过程文档，已统一归档到 `PROCESS/2026-04/`。
+其中：
+
+1. `MOCK_SERVICES_INTEGRATION_CHANGELOG_20260417.md` 用于记录改造范围、接口变更和决策。
+2. `MOCK_SERVICES_E2E_TEST_EVIDENCE_20260417.md` 用于沉淀联调测试证据与样例输出。
 
 ## 3. 历史过程资料（归档）
 

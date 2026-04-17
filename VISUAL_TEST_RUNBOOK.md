@@ -1,6 +1,6 @@
 # 可视化联调测试运行手册（无快捷脚本依赖）
 VISUAL_TEST_RUNBOOK
-更新时间：2026-04-01
+更新时间：2026-04-17
 
 ## 1. 本次整理结论
 
@@ -75,11 +75,11 @@ VISUAL_TEST_RUNBOOK
 ## 3. 启动顺序（建议）
 
 ### 步骤0：清理残留进程与释放端口（重测必备）
-每次重新测试前，若遇到 `EADDRINUSE` 端口占用报错或画面卡死，说明旧的服务仍在后台运行。请先在 PowerShell 中执行以下命令，一键删去正在运行的进程，释放 `3100`、`8080` 和 `8888` 端口：
+每次重新测试前，若遇到 `EADDRINUSE` 端口占用报错或画面卡死，说明旧的服务仍在后台运行。请先在 PowerShell 中执行以下命令，一键删去正在运行的进程，释放 `3100`、`3200`、`3300`、`8080` 和 `8888` 端口：
 
 ```powershell
 # 强制杀死占用相关端口的 Node 服务进程
-Get-NetTCPConnection -LocalPort 3100,8080,8888 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+Get-NetTCPConnection -LocalPort 3100,3200,3300,8080,8888 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 
 # 强制杀死可能卡在后台的 UE 进程
 Stop-Process -Name "ueProj" -Force -ErrorAction SilentlyContinue
@@ -89,7 +89,9 @@ Stop-Process -Name "PixelDemo" -Force -ErrorAction SilentlyContinue
 ### 步骤A：启动中台
 
 目录：`PROJECT/MIDDLEWARE/server`
-
+```powershell
+cd PROJECT/MIDDLEWARE/server
+```
 ```powershell
 npm install
 npm start
@@ -103,10 +105,35 @@ Invoke-WebRequest -Uri http://localhost:3100/healthz -Method GET
 
 期望：返回 `Ack`，其中 `payload.db.status` 为 `ok`。
 
-### 步骤B：启动前端信令服务
+### 步骤B：启动模拟后端与模拟LLM
+
+目录：`MOCK_SERVICES`
+```powershell
+cd MOCK_SERVICES
+```
+
+终端1（模拟后端）：
+```powershell
+npm install
+npm run start:backend
+```
+
+终端2（模拟LLM）：
+```powershell
+cd MOCK_SERVICES
+npm run start:llm
+```
+
+期望：
+- 输出 `[MockBackend] listening on http://127.0.0.1:3200`
+- 输出 `[MockLLM] listening on http://127.0.0.1:3300`
+
+### 步骤C：启动前端信令服务
 
 目录：`PROJECT/FRONT_UE/frontend/WebServers/SignallingWebServer`
-
+```powershell
+cd PROJECT/FRONT_UE/frontend/WebServers/SignallingWebServer
+```
 ```powershell
 npm install
 npm start
@@ -118,33 +145,23 @@ npm start
 - `WebSocket listening to Streamer connections on :8888`
 - `WebSocket listening to Players connections on :8080`
 
-### 步骤C：启动UE
+### 步骤D：启动UE
 
-目录：`PROJECT/UE_PROJECT`
+目录：`PROJECT/UE_PROJECT/PixelDemo/WindowsNoEditor`
 
 ```powershell
-Test-Path ".\PixelDemo.exe - 快捷方式.lnk"
-Start-Process ".\PixelDemo.exe - 快捷方式.lnk"
+cd PROJECT/UE_PROJECT/PixelDemo/WindowsNoEditor
+.\PixelDemo.exe -PixelStreamingIP=127.0.0.1 -PixelStreamingPort=8888 -AudioMixer -RenderOffscreen
 ```
 
 说明：
-- 快捷方式文件名包含空格与连字符，必须整体加引号传给 `Start-Process`。
-- 若写成 `Start-Process .\PixelDemo.exe - 快捷方式.lnk`，PowerShell 会把后半段当参数，导致启动异常。
-- PowerShell 不能直接“执行”`.lnk`，需使用 `Start-Process`（或资源管理器双击）。
-
-若怀疑快捷方式参数不正确，优先使用“最小可用命令”直接启动 UE（在 `WindowsNoEditor` 目录执行）：
-
-```powershell
-.\ueProj.exe -PixelStreamingIP=127.0.0.1 -PixelStreamingPort=8888 -AudioMixer -RenderOffscreen
-```
-
-说明：
+- 直接在 `WindowsNoEditor` 目录启动可以避免快捷方式路径配置错误导致的问题。
 - `PixelStreamingPort=8888` 必须和 `FRONT_UE/frontend/WebServers/SignallingWebServer/config.json` 的 `StreamerPort` 一致。
-- 若 `Start in` 不在 `WindowsNoEditor`，可能出现黑屏、秒退或无法推流。
+- 若 `Start in` 路径不对，可能出现黑屏、秒退或无法推流。
 
 期望：UE 日志出现成功连接到 signalling server。
 
-### 步骤D：打开前端页面
+### 步骤E：打开前端页面
 
 浏览器访问：
 
@@ -153,20 +170,26 @@ Start-Process ".\PixelDemo.exe - 快捷方式.lnk"
 
 根据页面中的连接状态进行联通性确认。
 
-### 步骤E：三点连通性快检（新增）
+### 步骤F：五点连通性快检（新增）
 
 在启动 UE 前先执行：
 
 ```powershell
 Test-NetConnection 127.0.0.1 -Port 3100
+Test-NetConnection 127.0.0.1 -Port 3200
+Test-NetConnection 127.0.0.1 -Port 3300
 Test-NetConnection 127.0.0.1 -Port 8080
 Test-NetConnection 127.0.0.1 -Port 8888
 Invoke-WebRequest -Uri http://127.0.0.1:8080/ -Method GET
 Invoke-WebRequest -Uri http://127.0.0.1:3100/healthz -Method GET
+Invoke-WebRequest -Uri http://127.0.0.1:3200/healthz -Method GET
+Invoke-WebRequest -Uri http://127.0.0.1:3300/healthz -Method GET
 ```
 
 判定标准：
 - `3100` 端口失败：中台服务未启动或端口被占用。
+- `3200` 端口失败：模拟后端未启动。
+- `3300` 端口失败：模拟LLM未启动。
 - `8080` 端口失败：前端信令服务未启动或端口被占用。
 - `8888` 端口失败：`cirrus.js` 未监听 Streamer 端口。
 - 页面能打开但很快提示 `Disconnected: Streamer is not connected`：说明浏览器到 Cirrus 通了，但 UE 没连上 `8888`。
@@ -177,7 +200,9 @@ Invoke-WebRequest -Uri http://127.0.0.1:3100/healthz -Method GET
 
 在前端执行以下动作：
 - 创建仿真
-- 写入帧（若页面提供）
+- 点击“启动模拟仿真”（触发 `POST /api/integration/backend/start`）
+- 播放，等待时间轴走到末尾并出现“仿真计算完成”提示
+- 在“大模型预案”中点击“生成并应用预案”（触发 `POST /api/integration/llm/plan`）
 - 播放/暂停/seek
 
 ### 4.2 中台接口快速检查
@@ -217,6 +242,15 @@ FROM plan_runs
 ORDER BY created_at DESC
 LIMIT 10;
 ```
+
+## 4.4 下一阶段替换验证（真实后端/真实LLM）
+
+当 Mock 服务替换为真实服务后，至少执行以下最小回归：
+
+1. 创建仿真并启动产帧，确认 `simulation_frames` 连续增长。
+2. 播放至结束，确认前端收到完成提示且状态可回读。
+3. 触发“生成并应用预案”，确认 `plans` 与 `plan_runs` 均有新增。
+4. 历史页抽样查看 3 个以上时刻，确认图表输入数据字段完整。
 
 ## 5. 失败排查最短路径
 

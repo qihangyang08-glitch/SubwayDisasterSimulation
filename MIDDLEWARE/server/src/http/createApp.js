@@ -55,6 +55,8 @@ function createApp(options = {}) {
   const idempotencyStore = options.idempotencyStore || new IdempotencyStore(options.idempotency);
   const retryQueue = options.retryQueue || [];
   const planDispatcher = options.planDispatcher || null;
+  const simulationGateway = options.simulationGateway || null;
+  const llmGateway = options.llmGateway || null;
 
   app.use(express.json({ limit: '2mb' }));
 
@@ -69,6 +71,8 @@ function createApp(options = {}) {
 
   const authEnabled = String(options.authEnabled ?? process.env.AUTH_ENABLED ?? '0') === '1';
   const authToken = options.authToken || process.env.AUTH_TOKEN || '';
+  const frameIngestToken = options.frameIngestToken || process.env.FRAME_INGEST_TOKEN || '';
+  const integrationApiToken = options.integrationApiToken || process.env.INTEGRATION_API_TOKEN || '';
   const debugHttp = String(options.debugHttp ?? process.env.DEBUG_HTTP ?? process.env.DEBUG ?? 'false').toLowerCase() === 'true';
 
   app.use((req, res, next) => {
@@ -153,6 +157,25 @@ function createApp(options = {}) {
     };
   }
 
+  function createTokenGuard(expectedToken, errorCode, errorMessage) {
+    return (req, res, next) => {
+      if (!expectedToken) {
+        return next();
+      }
+
+      const headerToken = req.header('x-internal-token') || '';
+      const bearer = req.header('authorization') || '';
+      const bearerToken = bearer.startsWith('Bearer ') ? bearer.slice(7) : '';
+      const providedToken = headerToken || bearerToken;
+
+      if (providedToken !== expectedToken) {
+        return next(new HttpError(403, errorCode, errorMessage));
+      }
+
+      return next();
+    };
+  }
+
   function deprecationHeaders(aliasOf) {
     return {
       Deprecation: 'true',
@@ -208,7 +231,14 @@ function createApp(options = {}) {
     });
   }));
 
-  app.post('/api/simulations/:simId/frames', asyncRoute(async (req, res) => {
+  app.post(
+    '/api/simulations/:simId/frames',
+    createTokenGuard(
+      frameIngestToken,
+      'FORBIDDEN_FRAME_WRITE',
+      'missing or invalid token for frame ingestion endpoint'
+    ),
+    asyncRoute(async (req, res) => {
     validateInsertFramesBody(req.body);
 
     const simulationId = req.params.simId;
@@ -231,7 +261,8 @@ function createApp(options = {}) {
         })
       };
     });
-  }));
+    })
+  );
 
   app.get('/api/simulations', asyncRoute(async (req, res) => {
     const simulations = await simulationRepo.listSimulations();
@@ -494,6 +525,109 @@ function createApp(options = {}) {
       }
     });
   }));
+
+  app.post(
+    '/api/integration/backend/start',
+    createTokenGuard(
+      integrationApiToken,
+      'FORBIDDEN_INTEGRATION_TRIGGER',
+      'missing or invalid token for integration trigger endpoint'
+    ),
+    asyncRoute(async (req, res) => {
+    if (!simulationGateway || typeof simulationGateway.startSimulation !== 'function') {
+      throw new HttpError(503, 'SIM_ENGINE_UNAVAILABLE', 'simulation gateway is not configured');
+    }
+
+    const body = req.body || {};
+    const simulationId = String(body.simulationId || '');
+    if (!simulationId) {
+      throw new HttpError(400, 'BAD_REQUEST', 'simulationId is required');
+    }
+
+    const simulation = await simulationRepo.getSimulationById(simulationId);
+    if (!simulation) {
+      throw notFound('simulationId', simulationId);
+    }
+
+    const initConfig = body.initConfig || await simulationRepo.getSimulationInitConfig(simulationId);
+    if (!initConfig || typeof initConfig !== 'object') {
+      throw new HttpError(422, 'UNPROCESSABLE_INIT_CONFIG', 'initConfig is required and must be an object');
+    }
+
+    validateCreateSimulationBody(initConfig);
+
+    const upstreamResponse = await simulationGateway.startSimulation({
+      requestId: req.res.locals.requestId,
+      simulationId,
+      initConfig,
+      options: body.options || {}
+    });
+
+    res.status(200).json(
+      ackEnvelope(req, simulationId, {
+        status: 'accepted',
+        simulationId,
+        upstreamResponse
+      })
+    );
+    })
+  );
+
+  app.post(
+    '/api/integration/llm/plan',
+    createTokenGuard(
+      integrationApiToken,
+      'FORBIDDEN_INTEGRATION_TRIGGER',
+      'missing or invalid token for integration trigger endpoint'
+    ),
+    asyncRoute(async (req, res) => {
+    if (!llmGateway || typeof llmGateway.generatePlan !== 'function') {
+      throw new HttpError(503, 'LLM_SERVICE_UNAVAILABLE', 'llm gateway is not configured');
+    }
+
+    const body = req.body || {};
+    const fromSimulationId = String(body.fromSimulationId || '');
+    if (!fromSimulationId) {
+      throw new HttpError(400, 'BAD_REQUEST', 'fromSimulationId is required');
+    }
+
+    const fromSimTime = parseNumberOrThrow(body.fromSimTime, 'fromSimTime');
+    if (fromSimTime < 0) {
+      throw new HttpError(400, 'BAD_REQUEST', 'fromSimTime must be >= 0');
+    }
+
+    const simulation = await simulationRepo.getSimulationById(fromSimulationId);
+    if (!simulation) {
+      throw notFound('fromSimulationId', fromSimulationId);
+    }
+
+    const baseInitConfig = await simulationRepo.getSimulationInitConfig(fromSimulationId);
+
+    const upstreamResponse = await llmGateway.generatePlan({
+      requestId: req.res.locals.requestId,
+      fromSimulationId,
+      fromSimTime,
+      objective: body.objective || '',
+      context: body.context || {},
+      initConfigLike: body.initConfigLike || baseInitConfig || {}
+    });
+
+    const planConfig = (upstreamResponse && upstreamResponse.planConfig) || upstreamResponse;
+    validateCreatePlanBody(planConfig);
+
+    const { planId } = await planRepo.createPlan(planConfig);
+    const compiledActionCount = compileActionQueue(planConfig).length;
+
+    res.status(200).json(
+      ackEnvelope(req, '', {
+        status: 'ok',
+        planId,
+        compiledActionCount,
+        planConfig
+      })
+    );
+    })
+  );
 
   app.post('/api/init', asyncRoute(async (req, res) => {
     validateCreateSimulationBody(req.body);

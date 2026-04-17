@@ -7,6 +7,7 @@ const { createApp } = require('./createApp');
 const { SimulationRepository } = require('../repositories/simulationRepository');
 const { PlanRepository } = require('../repositories/planRepository');
 const { createDispatcher } = require('../socket/dispatcher');
+const { createExternalClients } = require('../integration/externalClients');
 const { initializeDatabase, checkConnection, DB_CONFIG } = require('../db/dbInitializer');
 const { closePool } = require('../db/mysqlPool');
 
@@ -79,6 +80,7 @@ async function startServer() {
     // 步骤2: 创建Repository实例
     const simulationRepo = new SimulationRepository();
     const planRepo = new PlanRepository();
+    const { simulationGateway, llmGateway } = createExternalClients();
     let dispatcherApi = null;
 
     // 步骤3: 创建Express应用
@@ -87,6 +89,8 @@ async function startServer() {
       planRepo,
       version,
       getDbHealth: getDbHealthSnapshot,
+      simulationGateway,
+      llmGateway,
       planDispatcher: {
         async dispatchPlanCommand(input) {
           if (!dispatcherApi || typeof dispatcherApi.dispatchPlanCommand !== 'function') {

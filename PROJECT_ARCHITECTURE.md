@@ -1,6 +1,6 @@
 # 数字孪生地铁灾害应急仿真系统 - 项目架构说明
 **PROJECT_ARCHITECTURE**
-更新时间：2026-04-01
+更新时间：2026-04-17
 
 > 维护说明：当前对外执行基线已迁移到 `SYSTEM_DETAIL.md`、`ENV_SETUP.md`、`VISUAL_TEST_RUNBOOK.md` 与 `NOTES_AND_DECISIONS.md`。本文件保留为阶段性架构沉淀与问题复盘材料。
 
@@ -13,27 +13,30 @@
 
 ## 2. 系统宏观架构 (Macro Architecture)
 
-整个系统采取 **“三层+流媒体跨源”** 的核心架构模式：
+整个系统采取 **“三层+流媒体跨源+模拟服务过渡层”** 的核心架构模式：
 
 1. **表现层 (UE PixelStreaming & 前端 UI 面板)**
 2. **调度通信层 (Node.js Signal Server)**
 3. **业务与持久化层 (Node.js Middleware & MySQL Database)**
+4. **模拟服务层 (Mock Backend & Mock LLM for integration test)**
 
 ### 核心功能与端口绑定
 为了避免内网冲突并统一全组测试基准，当前系统固定端口规划如下：
 - **`8080`**: 前端信令 Web 服务面板端口 (HTTP/WebSocket - 被浏览器访问)
 - **`8888`**: UE PixelStreaming 推流信令端口 (WebSocket - 被 UE 程序和 Cirrus 等待连接)
 - **`3100`**: 中台业务接口端口 (REST API - 前端抓取或下发核心业务逻辑数据)
+- **`3200`**: 模拟后端服务端口 (中台触发产帧，回写 simulation_frames)
+- **`3300`**: 模拟大模型服务端口 (中台请求预案并落库)
 - **`3306`**: MySQL 本地数据库 (用于落库仿真记录和帧数据)
 
 ---
 
 ## 3. 子系统详细构成与代码分布 (Micro Layout)
 
-当前 `PROJECT/` 下共包含三个工程目录，按职责划分如下：
+当前 `PROJECT/` 下按联调职责可分为四类工程目录（UE、前端、中台、模拟服务），按职责划分如下：
 
 ### 3.1 表现层：虚幻引擎工程 (`UE_PROJECT/`)
-本目录包含打包好的 UE 客户端以及源码。UE 程序在这里通过激活内置的 Pixel Streaming 插件充带物理模拟和渲染的角色，也是系统的数据呈现终端。
+本目录包含打包好的 UE 客户端以及源码。UE 程序在这里通过激活内置的 Pixel Streaming 插件承担物理模拟和渲染角色，也是系统的数据呈现终端。
 - **角色关系**：UE 程序是“画面生产者”。通过 `-PixelStreamingIP=127.0.0.1 -PixelStreamingPort=8888 -AudioMixer -RenderOffscreen` 参数静默式推流连接到前端的信令服务器上。不能不挂参数直接启动，否则会导致丢流或无法与前端握手。
 
 ### 3.2 交互面板与信令层：前端服务 (`FRONT_UE/frontend/WebServers/SignallingWebServer/`)
@@ -43,14 +46,19 @@
   - **`history.html`**: 第二轮新增的历史数据独立页面，承载“左侧仿真列表 + 右侧时间顺序数据列 + 分析配置区”的细化功能。
   - **`www/history-page.css`**: 历史数据页面样式，负责独立布局与响应式适配。
   - **`scripts/app.js`**: Epic 的原生像素流控制库，负责底层 WebRTC（ `webRtcPlayerObj` ）和对 UE 控制信号交互。
-  - **`scripts/app-shell.js`**: 新加入的业务封装。它监听 UE 流状态、轮询查询 HTTP 服务器（比如检查 3100 的心兆），并负责解挂与展示加载遮罩层。
+  - **`scripts/app-shell.js`**: 新加入的业务封装。它监听 UE 流状态、轮询查询 HTTP 服务器（比如检查 3100 的心跳），并负责解挂与展示加载遮罩层。
   - **`scripts/history-page.js`**: 历史数据页面逻辑，负责历史列表加载、时序数据采样展示以及分析配置交互占位。
-- **角色关系**：通过 `socket.io` 同时向游览器分发信令并在后台通过 `8888` 端口同 UE 进程“牵红线”，让浏览器端的 WebRTC 可以直连 UE 的画面输出管道。
+- **角色关系**：通过 `socket.io` 同时向浏览器分发信令并在后台通过 `8888` 端口同 UE 进程“牵红线”，让浏览器端的 WebRTC 可以直连 UE 的画面输出管道。
 
 ### 3.3 业务与持久化层：中台服务 (`MIDDLEWARE/server/` & `MIDDLEWARE/db/`)
 中端采用标准的 Node+Express 作为接口服务，下连 MySQL 数据库作持久化。
 - **作用**：提供所有高阶任务的处理（如新建仿真事件记录、执行疏散帧数据存储）。前端 UI 上的所有统计分析面板数值，不是直接由像素流传回，而是通过 HTTP/Socket 从 `3100` 端口请求此中台得到的。
 - **角色关系**：为前端面板提供“大脑”支持。前端创建动作发给中台 -> 中台记录入库并生成 ID -> 中台或前端进一步发信令给 UE 完成引擎内的行为变化。
+
+### 3.4 模拟服务层：联调替身 (`../MOCK_SERVICES/`)
+- **Mock Backend**: 接收中台 `POST /api/integration/backend/start` 的上游触发后，按 `fps` 与 `totalFrames` 产出帧并调用中台 `POST /api/simulations/:simId/frames`。
+- **Mock LLM**: 接收中台 `POST /api/integration/llm/plan` 的上游触发后，返回合法 `PlanConfig`，由中台写入 `plans` 并继续 `apply` 流程。
+- **价值**: 在真实算法、真实大模型未完成前，保证前端-中台-数据链路可持续测试与回归。
 
 ---
 

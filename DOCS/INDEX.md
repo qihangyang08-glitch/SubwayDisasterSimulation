@@ -1,6 +1,6 @@
 # 文档中心索引
 
-更新时间：2026-04-01
+更新时间：2026-04-17
 
 ## 1. 对外主文档（根目录）
 
@@ -13,6 +13,11 @@
 ## 2. 过程文档（统一入口）
 
 - PROCESS/INDEX.md
+
+本轮新增（2026-04-17）：
+
+- PROCESS/2026-04/MOCK_SERVICES_INTEGRATION_CHANGELOG_20260417.md
+- PROCESS/2026-04/MOCK_SERVICES_E2E_TEST_EVIDENCE_20260417.md
 
 ## 3. 历史归档（Phase 1）
 

@@ -16,7 +16,10 @@
     pendingAck: {},
     bootstrapped: false,
     createEntities: [],
-    staffSeed: 1
+    staffSeed: 1,
+    completionNotifiedFor: "",
+    mockProgressTimer: null,
+    mockPlayableNotifiedFor: ""
   };
 
   // device 固定ID池，后续若需调整数量/类型，仅需修改该常量。
@@ -44,6 +47,79 @@
     }
     var level = type ? "[" + type.toUpperCase() + "] " : "";
     bar.textContent = new Date().toLocaleTimeString() + " " + level + msg;
+  }
+
+  function clearMockProgressProbe() {
+    if (state.mockProgressTimer) {
+      clearInterval(state.mockProgressTimer);
+      state.mockProgressTimer = null;
+    }
+  }
+
+  function startMockProgressProbe(simId) {
+    clearMockProgressProbe();
+
+    if (!simId) {
+      return;
+    }
+
+    var startedAt = Date.now();
+    var timeoutMs = 120000;
+
+    state.mockProgressTimer = setInterval(function () {
+      if (state.simulationId !== simId) {
+        clearMockProgressProbe();
+        return;
+      }
+
+      if (Date.now() - startedAt > timeoutMs) {
+        clearMockProgressProbe();
+        addLog("模拟后端进度轮询超时，请检查服务日志", "warn");
+        return;
+      }
+
+      global.MiddlewareClient.getSimulationInfo(simId)
+        .then(function (res) {
+          var payload = res && res.payload ? res.payload : {};
+          var maxSimTime = Number(payload.maxSimTime);
+          if (!Number.isFinite(maxSimTime)) {
+            return null;
+          }
+
+          state.minSimTime = safeNumber(payload.minSimTime, state.minSimTime);
+          state.maxSimTime = maxSimTime;
+          syncTimelineView();
+
+          if (state.mockPlayableNotifiedFor !== simId) {
+            state.mockPlayableNotifiedFor = simId;
+            setAck("ok", "已可开始播放");
+            addLog("已收到仿真帧，可开始播放", "ok");
+          }
+
+          return global.MiddlewareClient.getFrameByTime(simId, maxSimTime)
+            .then(function (frameRes) {
+              return parseFrameFromEnvelope(frameRes);
+            })
+            .catch(function () {
+              return null;
+            });
+        })
+        .then(function (frame) {
+          if (!frame || frame.simulationId !== simId) {
+            return;
+          }
+
+          if (frame.status === "completed" && state.completionNotifiedFor !== simId) {
+            state.completionNotifiedFor = simId;
+            setAck("ok", "仿真计算完成，可开始播放");
+            addLog("仿真计算完成（已可完整回放）", "ok");
+            clearMockProgressProbe();
+          }
+        })
+        .catch(function () {
+          // Keep polling. Temporary API/network errors are tolerated.
+        });
+    }, 1000);
   }
 
   function setDot(id, statusText, cls) {
@@ -181,6 +257,12 @@
     syncTimelineView();
     updateTopbar();
 
+    if (frame && frame.status === "completed" && state.completionNotifiedFor !== state.simulationId) {
+      state.completionNotifiedFor = state.simulationId;
+      setAck("ok", "仿真计算完成");
+      addLog("仿真计算完成（收到完成帧）", "ok");
+    }
+
     var placeholder = $("player-placeholder");
     if (placeholder) {
       placeholder.style.display = "none";
@@ -188,9 +270,26 @@
   }
 
   function onSimState(envelope) {
+    var previousState = state.latestSimState && state.latestSimState.state;
     state.latestSimState = parseFrameFromEnvelope(envelope);
     updateTopbar();
     syncTimelineView();
+
+    var currentState = state.latestSimState && state.latestSimState.state;
+    var currentTime = state.latestSimState && Number.isFinite(Number(state.latestSimState.currentTime))
+      ? Number(state.latestSimState.currentTime)
+      : 0;
+    var reachedEnd = state.maxSimTime > 0 && currentTime >= state.maxSimTime - 0.001;
+    if (
+      previousState === "playing"
+      && currentState === "paused"
+      && reachedEnd
+      && state.completionNotifiedFor !== state.simulationId
+    ) {
+      state.completionNotifiedFor = state.simulationId;
+      setAck("ok", "仿真计算完成");
+      addLog("仿真计算完成（播放到末尾）", "ok");
+    }
   }
 
   function onAck(envelope) {
@@ -852,6 +951,32 @@
       connectStreaming();
     });
 
+    $("start-mock-sim").addEventListener("click", function () {
+      if (!state.simulationId) {
+        addLog("请先创建或输入仿真ID", "warn");
+        return;
+      }
+
+      setAck("pending", "正在触发模拟后端");
+      global.MiddlewareClient.startIntegrationBackend(state.simulationId, {
+        fps: 2,
+        totalFrames: 30,
+        randomMode: false
+      })
+        .then(function () {
+          state.mockPlayableNotifiedFor = "";
+          setAck("ok", "模拟后端已启动");
+          addLog("已触发模拟后端，等待帧回写", "ok");
+          readSimulationInfo(state.simulationId);
+          startMockProgressProbe(state.simulationId);
+        })
+        .catch(function (err) {
+          clearMockProgressProbe();
+          setAck("error", "模拟后端触发失败");
+          addLog("触发模拟后端失败: " + err.message, "error");
+        });
+    });
+
     $("btn-play").addEventListener("click", function () {
       try {
         global.MiddlewareClient.emitPlay();
@@ -904,6 +1029,9 @@
             }
 
             state.simulationId = simId;
+            state.completionNotifiedFor = "";
+            state.mockPlayableNotifiedFor = "";
+            clearMockProgressProbe();
             global.MiddlewareClient.setSimulationId(simId);
             $("input-simulation-id").value = simId;
             $("create-modal").classList.remove("show");
@@ -956,7 +1084,13 @@
         return;
       }
 
-      global.MiddlewareClient.createPlan(body)
+      global.MiddlewareClient.requestIntegrationPlan({
+        fromSimulationId: state.simulationId,
+        fromSimTime: fromSimTime,
+        objective: objective,
+        context: body.context || {},
+        initConfigLike: body.initConfigLike || {}
+      })
         .then(function (res) {
           var planId = res && res.payload ? res.payload.planId : "";
           if (!planId) {
@@ -983,6 +1117,7 @@
         return;
       }
       state.simulationId = simId;
+      clearMockProgressProbe();
       global.MiddlewareClient.setSimulationId(simId);
       global.MiddlewareClient.socketSubscribe(simId);
       readSimulationInfo(simId);

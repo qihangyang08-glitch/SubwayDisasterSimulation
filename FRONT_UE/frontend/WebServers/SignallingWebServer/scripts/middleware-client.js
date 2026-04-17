@@ -31,6 +31,7 @@
       httpBaseUrl: (global.localStorage && global.localStorage.getItem("middlewareHttpBaseUrl")) || "http://127.0.0.1:3100",
       socketBaseUrl: (global.localStorage && global.localStorage.getItem("middlewareSocketBaseUrl")) || "http://127.0.0.1:3100",
       simulationId: "",
+      clientRole: "frontend",
       socket: null
     };
 
@@ -45,10 +46,13 @@
       return fetch(state.httpBaseUrl + path, options).then(toJson);
     }
 
-    function connectSocket(onEvent) {
+    function connectSocket(onEvent, options) {
       if (!global.io) {
         throw new Error("Socket.IO client script is not loaded");
       }
+
+      options = options || {};
+      state.clientRole = options.clientRole || state.clientRole || "frontend";
 
       if (state.socket) {
         state.socket.disconnect();
@@ -57,7 +61,8 @@
       state.socket = global.io(state.socketBaseUrl, {
         transports: ["websocket"],
         query: {
-          simulationId: state.simulationId || ""
+          simulationId: state.simulationId || "",
+          clientRole: state.clientRole
         }
       });
 
@@ -69,7 +74,8 @@
         if (state.simulationId) {
           state.socket.emit("subscribe", {
             simulationId: state.simulationId,
-            requestId: nowRequestId()
+            requestId: nowRequestId(),
+            clientRole: state.clientRole
           });
         }
       });
@@ -117,17 +123,24 @@
       setSimulationId: function (simulationId) {
         state.simulationId = simulationId || "";
       },
+      setClientRole: function (clientRole) {
+        state.clientRole = clientRole || "frontend";
+      },
       createEnvelope: createEnvelope,
       nowRequestId: nowRequestId,
       connectSocket: connectSocket,
-      socketSubscribe: function (simulationId) {
+      socketSubscribe: function (simulationId, clientRole) {
         state.simulationId = simulationId;
+        if (clientRole) {
+          state.clientRole = clientRole;
+        }
         if (!state.socket) {
           return;
         }
         state.socket.emit("subscribe", {
           simulationId: simulationId,
-          requestId: nowRequestId()
+          requestId: nowRequestId(),
+          clientRole: state.clientRole
         });
       },
       emitPlay: function () {
@@ -200,6 +213,29 @@
       },
       applyPlan: function (planId, body) {
         return request("/api/plans/" + encodeURIComponent(planId) + "/apply", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-request-id": nowRequestId()
+          },
+          body: JSON.stringify(body || {})
+        });
+      },
+      startIntegrationBackend: function (simulationId, options) {
+        return request("/api/integration/backend/start", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-request-id": nowRequestId()
+          },
+          body: JSON.stringify({
+            simulationId: simulationId,
+            options: options || {}
+          })
+        });
+      },
+      requestIntegrationPlan: function (body) {
+        return request("/api/integration/llm/plan", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

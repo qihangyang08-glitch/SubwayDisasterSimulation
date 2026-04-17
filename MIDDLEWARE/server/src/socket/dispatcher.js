@@ -6,6 +6,12 @@ function isFiniteNumber(value) {
 }
 
 function toFiniteNumber(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return null;
+  }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -123,12 +129,13 @@ function createDispatcher(options = {}) {
     );
   }
 
-  function emitFrame(session, frame, requestId) {
+  function emitFrame(session, frame, requestId, options = {}) {
+    const forceEmit = Boolean(options.forceEmit);
     if (!frame) {
       return false;
     }
 
-    if (session.lastFrame && compareFrames(frame, session.lastFrame) <= 0) {
+    if (!forceEmit && session.lastFrame && compareFrames(frame, session.lastFrame) <= 0) {
       return false;
     }
 
@@ -145,7 +152,7 @@ function createDispatcher(options = {}) {
     return true;
   }
 
-  async function publishNearestFrame(session, requestId, socketForWarning) {
+  async function publishNearestFrame(session, requestId, socketForWarning, options = {}) {
     const frame = await simulationRepo.getFrameByTime(session.simulationId, session.currentTime);
     if (!frame) {
       if (socketForWarning) {
@@ -158,7 +165,7 @@ function createDispatcher(options = {}) {
       return false;
     }
 
-    return emitFrame(session, frame, requestId);
+    return emitFrame(session, frame, requestId, options);
   }
 
   function enqueueCompiledActions(session, actions) {
@@ -295,7 +302,7 @@ function createDispatcher(options = {}) {
     session.connectedSockets.add(socket.id);
     console.log(`[Dispatcher] Socket ${socket.id} subscribed to ${simulationId} (role: ${socket.data.clientRole}, total clients: ${session.connectedSockets.size})`);
 
-    await publishNearestFrame(session, requestId, socket);
+    await publishNearestFrame(session, requestId, socket, { forceEmit: true });
     emitSimState(session, requestId);
     emitAck(socket, simulationId, requestId, {
       status: 'ok',
@@ -309,6 +316,8 @@ function createDispatcher(options = {}) {
     const simulationId = resolveSimulationId(socket, envelope);
     const session = await ensureSession(simulationId);
 
+    await publishNearestFrame(session, requestId, socket, { forceEmit: true });
+    executeDueActions(session);
     session.state = 'playing';
     console.log(`[Dispatcher] Session ${simulationId} state changed: paused → playing (currentTime: ${session.currentTime}s)`);
     emitSimState(session, requestId);
@@ -324,6 +333,8 @@ function createDispatcher(options = {}) {
     const session = await ensureSession(simulationId);
 
     session.state = 'paused';
+    await publishNearestFrame(session, requestId, socket, { forceEmit: true });
+    executeDueActions(session);
     console.log(`[Dispatcher] Session ${simulationId} state changed: playing → paused (currentTime: ${session.currentTime}s)`);
     emitSimState(session, requestId);
     emitAck(socket, simulationId, requestId, {
@@ -348,7 +359,7 @@ function createDispatcher(options = {}) {
     }
 
     session.currentTime = clampCurrentTime(session, targetTime);
-    await publishNearestFrame(session, requestId, socket);
+    await publishNearestFrame(session, requestId, socket, { forceEmit: true });
     executeDueActions(session);
     emitSimState(session, requestId);
     emitAck(socket, simulationId, requestId, {
